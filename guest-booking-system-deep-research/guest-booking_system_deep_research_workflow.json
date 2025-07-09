@@ -1,0 +1,1910 @@
+{
+  "name": "Generic Booking Form with Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "[GOOGLE_CALENDAR_ID]",
+          "mode": "list",
+          "cachedResultName": "Resource Availability Calendar"
+        },
+        "returnAll": true,
+        "timeMax": "={{ $now.plus({ month: 3 }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -2000,
+        1480
+      ],
+      "id": "31b6e35b-d8bf-45a8-8df2-0574f7cf2f49",
+      "name": "Google Calendar"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst maxBookingDate = new Date('2025-09-01');\n// Highlight: Set your own stay duration rules here\nconst minStay = 2;\nconst maxStay = 5;\n// The URL for the booking submission webhook\nconst submissionWebhookUrl = '[N8N_INSTANCE_URL]/webhook/booking-submit';\n\n// --- HELPER FUNCTIONS ---\nconst toISODateString = (date) => {\n  const year = date.getUTCFullYear();\n  const month = String(date.getUTCMonth() + 1).padStart(2, '0');\n  const day = String(date.getUTCDate()).padStart(2, '0');\n  return `${year}-${month}-${day}`;\n};\n\n// --- BACKEND LOGIC (HTML Generation) ---\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst todayStr = toISODateString(today);\n\nconst bookedDates = new Set();\nconst allEvents = $input.all().map(item => item.json);\n\nallEvents.forEach(event => {\n  if (event.start && event.end) {\n    const start = new Date(event.start.dateTime || event.start.date);\n    const end = new Date(event.end.dateTime || event.end.date);\n    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {\n      bookedDates.add(toISODateString(d));\n    }\n  }\n});\n\nconst months = [];\nconst currentMonth = new Date(today);\n\nwhile (currentMonth < maxBookingDate) {\n  const year = currentMonth.getFullYear();\n  const month = currentMonth.getMonth();\n  const monthName = currentMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });\n  \n  const firstDayOfWeek = new Date(year, month, 1).getDay();\n  const daysInMonth = new Date(year, month + 1, 0).getDate();\n  \n  let daysHtml = '';\n  daysHtml += '<div class=\"day empty\"></div>'.repeat(firstDayOfWeek);\n  \n  for (let day = 1; day <= daysInMonth; day++) {\n    const date = new Date(year, month, day);\n    const dateStr = toISODateString(date);\n    \n    const isPast = date < today;\n    const isBooked = bookedDates.has(dateStr);\n    const isAfterMax = date > maxBookingDate;\n    \n    let className = 'day';\n    if (isPast || isBooked || isAfterMax) {\n      className += ' unavailable';\n    } else {\n      className += ' available';\n    }\n    \n    daysHtml += `<div class=\"${className}\" data-date=\"${dateStr}\">${day}</div>`;\n  }\n  \n  const monthHtml = `\n    <div class=\"month\">\n      <h3>${monthName}</h3>\n      <div class=\"calendar-grid\">\n        <div class=\"day-header\">Sun</div><div class=\"day-header\">Mon</div><div class=\"day-header\">Tue</div><div class=\"day-header\">Wed</div><div class=\"day-header\">Thu</div><div class=\"day-header\">Fri</div><div class=\"day-header\">Sat</div>\n        ${daysHtml}\n      </div>\n    </div>`;\n  \n  months.push(monthHtml);\n  currentMonth.setMonth(currentMonth.getMonth() + 1);\n}\n\n// --- FULL HTML PAGE ---\nconst html = `\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Resource Booking Form</title>\n  <style>\n    :root {\n      --primary-color: #2196f3; --primary-dark: #1976d2; --primary-light: #bbdefb;\n      --available-bg: #e8f5e9; --available-text: #2e7d32;\n      --unavailable-bg: #f5f5f5; --unavailable-text: #ccc;\n      --white: #fff; --text-primary: #333; --text-secondary: #666;\n      --border-radius: 8px; --shadow: 0 4px 12px rgba(0,0,0,0.1);\n    }\n    * { box-sizing: border-box; }\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f7f9fc; color: var(--text-primary); }\n    .main-container { display: block; }\n    .form-container { display: none; }\n    h1 { margin-bottom: 10px; }\n    .subtitle { color: var(--text-secondary); margin-bottom: 30px; }\n    .months-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; margin-bottom: 30px; }\n    .month { background: var(--white); padding: 20px; border-radius: var(--border-radius); box-shadow: var(--shadow); }\n    .month h3 { margin: 0 0 15px 0; }\n    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }\n    .day-header { text-align: center; font-weight: bold; color: var(--text-secondary); font-size: 12px; padding: 5px; }\n    .day { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 5px; font-size: 14px; transition: all 0.2s ease; }\n    .day.available { background: var(--available-bg); color: var(--available-text); }\n    .day.available:hover { background: var(--primary-dark); color: var(--white); transform: scale(1.1); }\n    .day.unavailable { background: var(--unavailable-bg); color: var(--unavailable-text); cursor: not-allowed; }\n    .day.selected { background: var(--primary-color) !important; color: var(--white) !important; box-shadow: 0 0 0 2px var(--primary-dark); }\n    .day.in-range { background: var(--primary-light) !important; color: var(--primary-dark) !important; border-radius: 0; }\n    .selection-info, .form-wrapper { background: var(--white); padding: 20px; border-radius: var(--border-radius); box-shadow: var(--shadow); margin-bottom: 20px; }\n    .selection-info.hidden { display: none; }\n    .button { background: var(--primary-color); color: var(--white); border: none; padding: 12px 24px; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background 0.2s; }\n    .button:hover { background: var(--primary-dark); }\n    .button:disabled { background: var(--unavailable-text); cursor: not-allowed; }\n    .button.secondary { background: var(--text-secondary); }\n    .button.secondary:hover { background: var(--text-primary); }\n    .error { color: #d32f2f; margin-top: 10px; font-weight: bold; }\n    .legend { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px; font-size: 14px; }\n    .legend-item { display: flex; align-items: center; gap: 8px; }\n    .legend-box { width: 20px; height: 20px; border-radius: 3px; }\n    .form-field { margin-bottom: 15px; }\n    .form-field label { display: block; margin-bottom: 5px; font-weight: bold; }\n    .form-field input, .form-field textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem; }\n    #submit-message { padding: 15px; background: var(--available-bg); border-radius: 5px; color: var(--available-text); }\n  </style>\n</head>\n<body>\n  <h1>Book a Resource</h1>\n  <div class=\"main-container\">\n    <p class=\"subtitle\">Select your check-in and check-out dates (${minStay}-${maxStay} nights)</p>\n    <div class=\"legend\">\n      <div class=\"legend-item\"><div class=\"legend-box\" style=\"background: var(--available-bg);\"></div><span>Available</span></div>\n      <div class=\"legend-item\"><div class=\"legend-box\" style=\"background: var(--unavailable-bg);\"></div><span>Unavailable</span></div>\n      <div class=\"legend-item\"><div class=\"legend-box\" style=\"background: var(--primary-light);\"></div><span>Your Selection</span></div>\n    </div>\n    <div class=\"selection-info hidden\">\n      <h3>Your Selection</h3>\n      <p><strong>Check-in:</strong> <span id=\"checkin-date\">-</span></p>\n      <p><strong>Check-out:</strong> <span id=\"checkout-date\">-</span></p>\n      <p><strong>Nights:</strong> <span id=\"nights\">-</span></p>\n      <button class=\"button\" id=\"proceed-btn\">Proceed to Booking</button>\n      <div class=\"error hidden\" id=\"error-message\"></div>\n    </div>\n    <div class=\"months-container\">${months.join('')}</div>\n  </div>\n  <div class=\"form-container\">\n    <div class=\"form-wrapper\">\n      <h3>Complete Your Booking</h3>\n      <p><strong>Check-in:</strong> <span id=\"form-checkin-date\">-</span></p>\n      <p><strong>Check-out:</strong> <span id=\"form-checkout-date\">-</span></p>\n      <p><strong>Nights:</strong> <span id=\"form-nights\">-</span></p>\n      <form id=\"booking-form\" style=\"margin-top: 20px;\">\n        <div class=\"form-field\"><label for=\"guest_name\">Full Name *</label><input type=\"text\" id=\"guest_name\" name=\"guest_name\" required></div>\n        <div class=\"form-field\"><label for=\"email\">Email *</label><input type=\"email\" id=\"email\" name=\"email\" required></div>\n  <div class=\"form-field\">\n  <label for=\"purpose\">\n    Please provide the purpose of your booking.\n    <br>\n    (You can add other relevant questions here for your users).\n  </label>\n  <textarea id=\"purpose\" name=\"purpose\" required rows=\"3\"></textarea>\n  <div class=\"form-field\"><label for=\"personal_website\">Link to your personal website / social media *</label><input type=\"personal_website\" id=\"personal_website\" name=\"personal_website\" required></div>\n</div>\n        <input type=\"hidden\" name=\"check_in\" id=\"hidden-checkin\">\n        <input type=\"hidden\" name=\"check_out\" id=\"hidden-checkout\">\n        <button type=\"submit\" class=\"button\">Submit Booking Request</button>\n        <button type=\"button\" class=\"button secondary\" id=\"back-to-calendar-btn\" style=\"margin-left: 10px;\">Back to Calendar</button>\n      </form>\n      <div id=\"submit-message\" class=\"hidden\" style=\"margin-top: 20px;\"></div>\n    </div>\n  </div>\n\n  <script>\n    const bookedDates = new Set(${JSON.stringify(Array.from(bookedDates))});\n    const minStay = ${minStay};\n    const maxStay = ${maxStay};\n    const maxBookingDate = new Date('${maxBookingDate.toISOString()}');\n    const today = new Date('${todayStr}');\n    \n    const selectionInfoEl = document.querySelector('.selection-info');\n    const errorMessageEl = document.getElementById('error-message');\n    const proceedBtn = document.getElementById('proceed-btn');\n    const allDayEls = document.querySelectorAll('.day.available');\n    \n    let startDate = null;\n    let endDate = null;\n\n    const toISODateString = (date) => date.toISOString().split('T')[0];\n\n    function isDateAvailable(dateStr) {\n      const date = new Date(dateStr);\n      return date >= today && !bookedDates.has(dateStr) && date <= maxBookingDate;\n    }\n    \n    function isRangeAvailable(startStr, endStr) {\n      const start = new Date(startStr);\n      const end = new Date(endStr);\n      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {\n        if (!isDateAvailable(toISODateString(d))) return false;\n      }\n      return true;\n    }\n    \n    function updateSelectionUI() {\n      document.querySelectorAll('.day').forEach(d => d.classList.remove('selected', 'in-range'));\n      if (!startDate) {\n        selectionInfoEl.classList.add('hidden');\n        return;\n      }\n      const startDayEl = document.querySelector(\\`[data-date=\"\\${startDate}\"]\\`);\n      if (startDayEl) startDayEl.classList.add('selected');\n      if (!endDate) {\n        selectionInfoEl.classList.add('hidden');\n        return;\n      }\n      const endDayEl = document.querySelector(\\`[data-date=\"\\${endDate}\"]\\`);\n      if (endDayEl) endDayEl.classList.add('selected');\n      const start = new Date(startDate);\n      const end = new Date(endDate);\n      for (let d = new Date(start.setDate(start.getDate() + 1)); d < end; d.setDate(d.getDate() + 1)) {\n        const dateStr = toISODateString(d);\n        const dayEl = document.querySelector(\\`[data-date=\"\\${dateStr}\"]\\`);\n        if (dayEl) dayEl.classList.add('in-range');\n      }\n      const nights = Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24));\n      document.getElementById('checkin-date').textContent = new Date(startDate+'T00:00:00').toLocaleDateString('en-GB');\n      document.getElementById('checkout-date').textContent = new Date(endDate+'T00:00:00').toLocaleDateString('en-GB');\n      document.getElementById('nights').textContent = nights;\n      selectionInfoEl.classList.remove('hidden');\n      \n      if (nights < minStay || nights > maxStay) {\n        errorMessageEl.textContent = \\`Stay must be between \\${minStay} and \\${maxStay} nights.\\`;\n        errorMessageEl.classList.remove('hidden');\n        proceedBtn.disabled = true;\n      } else {\n        errorMessageEl.classList.add('hidden');\n        proceedBtn.disabled = false;\n      }\n    }\n    \n    function handleDayClick(e) {\n      const date = e.target.dataset.date;\n      if (!date) return;\n      if (!startDate || (startDate && endDate)) {\n        startDate = date;\n        endDate = null;\n      } else {\n        if (date < startDate) {\n          endDate = startDate;\n          startDate = date;\n        } else {\n          endDate = date;\n        }\n        if (!isRangeAvailable(startDate, endDate)) {\n          alert('Selected range includes unavailable dates. Starting new selection.');\n          startDate = date;\n          endDate = null;\n        }\n      }\n      updateSelectionUI();\n    }\n\n    function showBookingForm() {\n      const nights = Math.round((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24));\n      const checkinDateDisplay = new Date(startDate+'T00:00:00').toLocaleDateString('en-GB');\n      const checkoutDateDisplay = new Date(endDate+'T00:00:00').toLocaleDateString('en-GB');\n      document.getElementById('form-checkin-date').textContent = checkinDateDisplay;\n      document.getElementById('form-checkout-date').textContent = checkoutDateDisplay;\n      document.getElementById('form-nights').textContent = nights;\n      document.getElementById('hidden-checkin').value = startDate;\n      document.getElementById('hidden-checkout').value = endDate;\n      document.querySelector('.main-container').style.display = 'none';\n      document.querySelector('.form-container').style.display = 'block';\n    }\n\n    function showCalendarView() {\n      document.querySelector('.main-container').style.display = 'block';\n      document.querySelector('.form-container').style.display = 'none';\n    }\n\n   async function handleFormSubmit(e) {\n  e.preventDefault();\n  const form = e.target;\n  const submitBtn = form.querySelector('button[type=\"submit\"]');\n  const data = Object.fromEntries(new FormData(form));\n  \n  submitBtn.disabled = true;\n  submitBtn.textContent = 'Submitting...';\n  \n  // Show success immediately\n  const successMessage = \\`\n    <h3>✅ Booking Request Received!</h3>\n    <p>Thank you. We will review your request and respond within 48 hours.</p>\n    <p>If approved, you will receive a confirmation email at <strong>\\${data.email}</strong></p>\n    <button class=\"button\" onclick=\"location.reload()\">Make Another Booking</button>\n  \\`;\n  \n  // Hide form and show success\n  form.style.display = 'none';\n  document.getElementById('submit-message').innerHTML = successMessage;\n  document.getElementById('submit-message').classList.remove('hidden');\n  \n  // Send request in background\n  try {\n    const response = await fetch(\\`${submissionWebhookUrl}\\`, {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(data)\n    });\n    \n    if (!response.ok) {\n      // Only log, don't disturb the user\n      console.error('Submission failed with status:', response.status);\n      \n      // Optionally, you could add a small note without removing the success message\n      const submitMessage = document.getElementById('submit-message');\n      if (submitMessage) {\n        submitMessage.innerHTML += '<p style=\"font-size: 0.9em; color: #666; margin-top: 20px;\"><em>Note: There was a technical issue, but we\\\\'ve recorded your request. Please email us if you don\\\\'t hear back within 48 hours.</em></p>';\n      }\n    }\n  } catch (error) {\n    console.error('Submission error:', error);\n    // Similar optional note could be added here\n  }\n}\n\n    allDayEls.forEach(day => day.addEventListener('click', handleDayClick));\n    proceedBtn.addEventListener('click', showBookingForm);\n    document.getElementById('back-to-calendar-btn').addEventListener('click', showCalendarView);\n    document.getElementById('booking-form').addEventListener('submit', handleFormSubmit);\n  </script>\n</body>\n</html>`;\n\nreturn { html };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1780,
+        1480
+      ],
+      "id": "dbe7eeca-43b4-4aa5-82ae-e86f0fdd2f2b",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1560,
+        1480
+      ],
+      "id": "6fb86ea8-2184-4bce-aa8e-a443182b0881",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-submit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1240,
+        1500
+      ],
+      "id": "ba18c3d3-e61d-417b-b0ed-e8afb6b1c44a",
+      "name": "booking-submit",
+      "webhookId": "[WEBHOOK_ID_BOOKING_SUBMIT]"
+    },
+    {
+      "parameters": {
+        "path": "booking-page",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2220,
+        1480
+      ],
+      "id": "c70745ef-6278-481c-9590-2bf271f0c973",
+      "name": "booking-page",
+      "webhookId": "[WEBHOOK_ID_BOOKING_PAGE]"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings",
+          "cachedResultUrl": "https://airtable.com/[AIRTABLE_BASE_ID]"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table",
+          "cachedResultUrl": "https://airtable.com/[AIRTABLE_BASE_ID]/[AIRTABLE_TABLE_ID]"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Guest Name": "={{ $('booking-submit').first().json.body.guest_name }}",
+            "Check-in Date": "={{ new Date($('booking-submit').first().json.body.check_in).toISOString() }}",
+            "Email": "={{ $('booking-submit').first().json.body.email }}",
+            "Check-out Date": "={{ new Date($('booking-submit').first().json.body.check_out).toISOString() }}",
+            "Purpose": "={{ $('booking-submit').first().json.body.purpose }}",
+            "Personal Website": "={{ $('booking-submit').first().json.body.personal_website }}",
+            "Automated Research": "={{ $('Generate Comprehensive Research Report1').first().json.output }}",
+            "Slack Message ID": "="
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Guest Name",
+              "displayName": "Guest Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Check-in Date",
+              "displayName": "Check-in Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Check-out Date",
+              "displayName": "Check-out Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Purpose",
+              "displayName": "Purpose",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Personal Website",
+              "displayName": "Personal Website",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Automated Research",
+              "displayName": "Automated Research",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Pending",
+                  "value": "Pending"
+                },
+                {
+                  "name": "Approved",
+                  "value": "Approved"
+                },
+                {
+                  "name": "Rejected",
+                  "value": "Rejected"
+                },
+                {
+                  "name": "Cancelled",
+                  "value": "Cancelled"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Slack Message ID",
+              "displayName": "Slack Message ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection Reason",
+              "displayName": "Rejection Reason",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejected By",
+              "displayName": "Rejected By",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -920,
+        1500
+      ],
+      "id": "12af1e71-280c-4147-ad1f-645fd4460b26",
+      "name": "Airtable"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": true,\n  \"message\": \"Booking request received\"\n}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        120,
+        1500
+      ],
+      "id": "d5229910-65ca-4bfe-af6b-d13aa9e7b2cd",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1260,
+        1880
+      ],
+      "id": "20c77cdb-9028-4636-9755-a249761dc600",
+      "name": "Check Every Hour"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Approved"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -820,
+        1880
+      ],
+      "id": "161d7abd-a498-49a5-8ee8-9b0629e07687",
+      "name": "Update Status to Approved"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "[GOOGLE_CALENDAR_ID]",
+          "mode": "list",
+          "cachedResultName": "Resource Availability Calendar"
+        },
+        "start": "={{ $json.fields['Check-in Date'] }}",
+        "end": "={{ $json.fields['Check-out Date'] }}",
+        "additionalFields": {
+          "description": "Guest: {{ $json.fields['Guest Name'] }}\nEmail: {{ $json.fields['Email'] }}\nPurpose: {{ $json.fields['Purpose'] }}\n\nBooking auto-approved after review period.",
+          "summary": "Resource Booked"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        1880
+      ],
+      "id": "0fa133aa-9b64-44f6-bcfd-43fc668c9c3e",
+      "name": "Create Calendar Event"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "[SLACK_USER_ID_TO_NOTIFY]",
+          "mode": "list",
+          "cachedResultName": "simonowisdom"
+        },
+        "text": "=:white_check_mark: *Booking Auto-Approved*\n\n*Guest:* {{ $('Get Pending Bookings (96h+)').item.json['Guest Name'] }}\n*Email:* {{ $('Get Pending Bookings (96h+)').item.json.Email }}\n*Check-in:* {{ $('Get Pending Bookings (96h+)').item.json['Check-in Date'] }}\n*Check-out:* {{ $('Get Pending Bookings (96h+)').item.json['Check-out Date'] }}\n*Info:* {{ $('Get Pending Bookings (96h+)').item.json.Purpose }}\n\n_This booking has been automatically approved after the review period without objection._",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -380,
+        1880
+      ],
+      "id": "7d8d42be-a207-438c-bd9a-788a5bc9ccb8",
+      "name": "Send Slack Update",
+      "webhookId": "[WEBHOOK_ID_SLACK_UPDATE]"
+    },
+    {
+      "parameters": {
+        "fromEmail": "[SENDER_EMAIL]",
+        "toEmail": "={{ $('Get Pending Bookings (96h+)').item.json.Email }}",
+        "subject": "Your Booking with [Your Organization Name] is Confirmed!",
+        "html": "=Hi {{ $('Get Pending Bookings (96h+)').item.json['Guest Name'].toSentenceCase() }},<br><br>\n\nWe’re happy to confirm your booking.<br><br>\n\n<strong>Check-in:</strong> {{ $('Get Pending Bookings (96h+)').item.json['Check-in Date'] }}<br>\n<strong>Check-out:</strong> {{ $('Get Pending Bookings (96h+)').item.json['Check-out Date'] }}<br><br>\n\nNext Steps:<br>\n<ul>\n  <li>Please let us know what time you plan to arrive on the day so we can make sure someone is around to assist you. The best way to contact us is by emailing [REPLY_TO_EMAIL]</li>\n  <li>Check-out time is 11:00 AM on the departure day.</li>\n  <li>During your stay, we expect you to respect our <a href=\"[URL_TO_YOUR_CODE_OF_CONDUCT]\">code of conduct</a> and complete any required checkout procedures.</li>\n</ul>\n\nWe look forward to welcoming you. If you have any questions, please feel free to reach out.<br><br>\n\nCheers,<br>\n[Your Team/Organization Name]",
+        "options": {
+          "replyTo": "[REPLY_TO_EMAIL]"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -160,
+        1880
+      ],
+      "id": "574ecaf7-9fbb-4014-afce-17a7d1816137",
+      "name": "Send Confirmation Email",
+      "webhookId": "[WEBHOOK_ID_EMAIL_CONFIRM]"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        60,
+        1880
+      ],
+      "id": "4ef96e18-09e7-479a-b926-49b23609588c",
+      "name": "Summary"
+    },
+    {
+      "parameters": {
+        "content": "## Submit booking\n- Triggers when a user fills out the booking form.",
+        "height": 320,
+        "width": 1620,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        1340
+      ],
+      "id": "162fad5c-5ae9-4b13-97ba-6ed397c62500",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Auto-approve Pending bookings\n- Runs on a schedule (e.g., every hour).\n- Finds bookings that are past their review-by date and are still pending.\n- Updates Airtable, creates a calendar event, and sends notifications.",
+        "height": 420,
+        "width": 1620
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        1720
+      ],
+      "id": "5e10b6ed-e296-49ba-bfa8-c1422fa8563d",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract guest information from the booking workflow\nconst guestName = $('booking-submit').first().json.body.guest_name || '';\nconst personalWebsite = $('booking-submit').first().json.body.personal_website|| '';\nconst purpose = $('booking-submit').first().json.body.purpose || '';\nconst email = $('booking-submit').first().json.body.email || '';\n\n// Create a comprehensive research query\nconst researchQuery = `${guestName} ${personalWebsite}`;\n\nreturn [{\n  json: {\n    guestName: guestName,\n    personalWebsite: personalWebsite,\n    purpose: purpose,\n    email: email,\n    researchQuery: researchQuery,\n    originalData: $json\n  }\n}];"
+      },
+      "id": "39d62139-1035-445b-8df2-eb4bf8606b55",
+      "name": "Prepare Guest Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Research Query: Find information about {{ $json.guestName }} who has website {{ $json.personalWebsite }}. They describe themselves as: {{ $json.purpose }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are an expert research assistant. Given information about a person requesting a booking, generate up to four distinct, precise search queries to help gather comprehensive information about them, their work, and their background. Focus on understanding their professional work and interests relevant to our organization. Return only a JSON list of strings, for example: ['query1', 'query2', 'query3', 'query4']."
+            }
+          ]
+        }
+      },
+      "id": "f665e7d1-c911-47aa-8ffb-9f744e33f8cb",
+      "name": "Generate Search Queries using LLM1",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [
+        -820,
+        540
+      ],
+      "typeVersion": 1.5
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.5-flash-lite-preview-06-17",
+        "options": {}
+      },
+      "id": "f56a8711-2ce1-42c4-81b3-0fa4458f51bb",
+      "name": "LLM Response Provider (OpenRouter)1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "position": [
+        -640,
+        880
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the input JSON string and split it into four chunks\nconst rawText = $json.text;\n\n// Remove Markdown JSON code blocks if present\nconst cleanedText = rawText.replace(/```json|```/g, '').trim();\n\ntry {\n    const jsonArray = JSON.parse(cleanedText);\n    if (!Array.isArray(jsonArray)) {\n        throw new Error('The JSON is not an array.');\n    }\n    const chunkSize = Math.ceil(jsonArray.length / 4);\n    const chunks = [];\n    for (let i = 0; i < jsonArray.length; i += chunkSize) {\n        chunks.push(jsonArray.slice(i, i + chunkSize));\n    }\n    return chunks.map(chunk => ({ json: { chunk } }));\n} catch (error) {\n    return [{ json: { error: error.message } }];\n}"
+      },
+      "id": "4c3c46b9-73ab-4e22-bf91-c6f8920588f0",
+      "name": "Parse and Chunk JSON Data1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -440,
+        540
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://r.jina.ai/{{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "bdbd5a61-6f5d-45c3-84cf-064471db2463",
+      "name": "Perform Jina AI Analysis Request1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        280,
+        860
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the organic search results from SerpAPI\nconst input = $input.first().json;\n\n// Handle multiple search queries - get results from all of them\nlet allResults = [];\n\n// If input is an array (multiple queries)\nif (Array.isArray(input)) {\n  input.forEach(queryResult => {\n    if (queryResult.web && queryResult.web.results) {\n      allResults = allResults.concat(queryResult.web.results);\n    }\n  });\n} else {\n  // If input is a single query result\n  if (input.web && input.web.results) {\n    allResults = input.web.results;\n  }\n}\n\nif (!allResults || allResults.length === 0) {\n  return [{ json: { error: 'No search results found.' } }];\n}\n\nconst formattedResults = allResults.map(result => ({\n  title: result.title || 'No title available',\n  url: result.url || 'No link available',\n  source: result.profile?.name || result.meta_url?.netloc || 'Unknown source',\n  description: result.description || 'No description available'\n}));\n\nreturn formattedResults.map(result => ({ json: result }));"
+      },
+      "id": "f7b3513e-693e-4170-bebf-3248e0cd0ef4",
+      "name": "Format SerpAPI Organic Results1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        0,
+        380
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Search Queries Used: {{ $('Parse and Chunk JSON Data1').all().map(item => item.json.chunk[0]).join(', ') }}\nWebpage Contents: \n\"\"\"\n{{ $json.data }}\n\"\"\"",
+        "options": {
+          "systemMessage": "=You are an expert information extractor. Given the applicant's information and the webpage content, extract all relevant pieces of information about their work, projects, interests, and background that would be useful for understanding who they are and their potential fit with our organization. Return only the relevant context as plain text without any additional commentary."
+        }
+      },
+      "id": "08ab6e3f-486d-4f1a-9231-f7a9de6ba2b1",
+      "name": "Extract Relevant Context via LLM1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        680,
+        540
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Extracted Contexts (merged):\n\"\"\"\n{{ $json.output }}\n\"\"\"",
+        "options": {
+          "systemMessage": "You are an expert researcher creating a background report about a booking applicant. Based on the gathered contexts and the application information, generate a comprehensive report that helps understand who this person is, what they work on, and their potential fit with our community.\n\nBe factual and objective, focusing on publicly available information. This report will be shared internally, so keep it concise (4-5 sentences max). Do NOT include boilerplate like 'This report provides...' or any formatting like bolded headers or sections. Treat it like an executive briefing for a very busy team."
+        }
+      },
+      "id": "e6dff74f-5303-4737-8098-944d5903a4e8",
+      "name": "Generate Comprehensive Research Report1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1280,
+        540
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e58e1ac7-a5bc-43a0-93d4-d0a113428b42",
+      "name": "Split Data for SerpAPI Batching1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        -220,
+        540
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "334141f7-1d6c-48d9-a258-117d35102426",
+      "name": "Split Data for Jina AI Batching1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        500,
+        520
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=my_test_session"
+      },
+      "id": "cc41b4e6-0c75-484e-81bf-00b91062ec4a",
+      "name": "LLM Memory Buffer (Input Context)1",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "position": [
+        760,
+        760
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=my_test_session",
+        "contextWindowLength": 20
+      },
+      "id": "9463168e-2092-4835-b0e6-b3c6627100ac",
+      "name": "LLM Memory Buffer (Report Context)1",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "position": [
+        1300,
+        760
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {},
+      "id": "11d24c8d-7cc5-4c0b-b9fd-7764f59ab475",
+      "name": "Fetch Wikipedia Information1",
+      "type": "@n8n/n8n-nodes-langchain.toolWikipedia",
+      "position": [
+        1420,
+        760
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Booking Page\n- A webhook that serves an HTML booking form.",
+        "height": 300,
+        "width": 880
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2260,
+        1340
+      ],
+      "id": "f65afc07-8c52-4cfa-ab8c-5561a68d4951",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "output"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        540
+      ],
+      "id": "4d0a6f35-3806-4722-aa0f-2ffe0e1146a9",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "content": "## Automated Research Agent\n- This sub-workflow takes the applicant's info, generates search queries, scrapes the web, and produces a summary.",
+        "height": 740,
+        "width": 2920
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1080,
+        320
+      ],
+      "id": "ca3f89e4-21ea-46d8-bdf3-58c2a1e4f616",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table"
+        },
+        "filterByFormula": "=AND({Status} = 'Pending', IS_BEFORE({Auto-Approve At}, NOW()))",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -1040,
+        1880
+      ],
+      "id": "7f64e28e-1282-4692-9f0b-bc0e8759b3f6",
+      "name": "Get Pending Bookings (96h+)"
+    },
+    {
+      "parameters": {
+        "path": "approve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1260,
+        2280
+      ],
+      "id": "48a922c1-6702-4eb8-ab3e-7cc8b1ce38c5",
+      "name": "Approve Webhook",
+      "webhookId": "approve-booking-webhook"
+    },
+    {
+      "parameters": {
+        "path": "reject",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1260,
+        2480
+      ],
+      "id": "3016e659-6520-46de-93de-99adb7209b39",
+      "name": "Reject Webhook",
+      "webhookId": "reject-booking-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract booking ID and message timestamp from URL parameters\nconst bookingId = $json.query.booking;\nconst messageTs = $json.query.timestamp;\n\nif (!bookingId) {\n  throw new Error('No booking ID provided in URL');\n}\n\nif (!messageTs) {\n  throw new Error('No message timestamp provided in URL');\n}\n\nreturn [{\n  json: {\n    bookingId: bookingId,\n    messageTs: messageTs,\n    action: 'approve',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        2280
+      ],
+      "id": "1830904b-223a-4d27-9495-52682971806b",
+      "name": "Extract Approve Booking ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract booking ID and message timestamp from URL parameters\nconst bookingId = $json.query.booking;\nconst messageTs = $json.query.timestamp;\n\nif (!bookingId) {\n  throw new Error('No booking ID provided in URL');\n}\n\nif (!messageTs) {\n  throw new Error('No message timestamp provided in URL');\n}\n\nreturn [{\n  json: {\n    bookingId: bookingId,\n    messageTs: messageTs,\n    action: 'reject',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        2480
+      ],
+      "id": "76f97192-75b7-49dd-82d3-ea60d47f8bc3",
+      "name": "Extract Reject Booking ID"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Approved",
+            "id": "={{ $json.bookingId }}",
+            "Slack Message ID": "="
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -820,
+        2280
+      ],
+      "id": "08604576-a948-4265-b29b-87038d30ff3c",
+      "name": "Update Booking - Approved"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Rejected",
+            "Rejection Reason": "Manual rejection via Slack button",
+            "id": "={{ $json.bookingId }}",
+            "Slack Message ID": "="
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -820,
+        2480
+      ],
+      "id": "86e9eaa8-32d1-4aab-80b1-552758cf2875",
+      "name": "Update Booking - Rejected"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "text": "=✅ *Booking APPROVED*\n\n*Guest:* {{ $('Update Booking - Approved').first().json.fields['Guest Name'] }}\n*Email:* {{ $('Update Booking - Approved').first().json.fields['Email'] }}\n*Check-in:* {{ $('Update Booking - Approved').first().json.fields['Check-in Date'] }}\n*Check-out:* {{ $('Update Booking - Approved').first().json.fields['Check-out Date'] }}\n\n_This booking has been manually approved via Slack button._",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        280,
+        2280
+      ],
+      "id": "2d857125-2a70-4fe1-8f15-662ae2b40c69",
+      "name": "Send Approval Notification",
+      "webhookId": "[WEBHOOK_ID_SLACK_APPROVAL]"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "text": "=❌ *Booking REJECTED*\n\n*Guest:* {{ $('Update Booking - Rejected').first().json.fields['Guest Name'] }}\n*Email:* {{ $('Update Booking - Rejected').first().json.fields['Email'] }}\n*Check-in:* {{ $('Update Booking - Rejected').first().json.fields['Check-in Date'] }}\n*Check-out:* {{ $('Update Booking - Rejected').first().json.fields['Check-out Date'] }}\n\n_This booking has been manually rejected via Slack button._",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        280,
+        2480
+      ],
+      "id": "3becc287-caed-4867-989c-537587c1fbe5",
+      "name": "Send Rejection Notification",
+      "webhookId": "[WEBHOOK_ID_SLACK_REJECT]"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Booking Approved</title>\n    <style>\n        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f8ff; }\n        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }\n        .success { color: #28a745; font-size: 24px; margin-bottom: 20px; }\n        .message { font-size: 16px; color: #333; }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <div class=\"success\">✅ Booking Approved!</div>\n        <div class=\"message\">The booking has been approved successfully. The applicant will receive a confirmation email shortly.</div>\n    </div>\n    <script>setTimeout(() => window.close(), 3000);</script>\n</body>\n</html>",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        500,
+        2280
+      ],
+      "id": "f188a4fa-84c6-4b6c-a423-d6520bcfe592",
+      "name": "Respond Approve Success"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n    <title>Booking Rejected</title>\n    <style>\n        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #fff5f5; }\n        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }\n        .error { color: #dc3545; font-size: 24px; margin-bottom: 20px; }\n        .message { font-size: 16px; color: #333; }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <div class=\"error\">❌ Booking Rejected</div>\n        <div class=\"message\">The booking request has been rejected and will not proceed.</div>\n    </div>\n    <script>setTimeout(() => window.close(), 3000);</script>\n</body>\n</html>",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        500,
+        2480
+      ],
+      "id": "e878d32c-4245-4e48-928a-fd0c5b38bc04",
+      "name": "Respond Reject Success"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "[GOOGLE_CALENDAR_ID]",
+          "mode": "list",
+          "cachedResultName": "Resource Availability Calendar"
+        },
+        "start": "={{ $json.fields['Check-in Date'] }}",
+        "end": "={{ $json.fields['Check-out Date'] }}",
+        "additionalFields": {
+          "description": "=Guest: {{ $json.fields['Guest Name'] }}\nEmail: {{ $json.fields['Email'] }}\nPurpose: {{ $json.fields['Purpose'] }}\n\nBooking manually approved via Slack.",
+          "summary": "Resource Booked"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -600,
+        2280
+      ],
+      "id": "bfab4fc1-aeb0-4ae3-9cdb-d7d2ed5fc517",
+      "name": "Create Calendar Event1"
+    },
+    {
+      "parameters": {
+        "fromEmail": "[SENDER_EMAIL]",
+        "toEmail": "={{ $('Update Booking - Approved').first().json.fields['Email'] }}",
+        "subject": "Your Booking with [Your Organization Name] is Confirmed!",
+        "html": "=Hi {{ $('Update Booking - Approved').first().json.fields['Guest Name']?.split(' ')[0]?.toSentenceCase() || 'there' }},<br><br>\n\nWe’re happy to confirm your booking.<br><br>\n\n<strong>Check-in:</strong> {{ $('Update Booking - Approved').first().json.fields['Check-in Date'] }}<br>\n<strong>Check-out:</strong> {{ $('Update Booking - Approved').first().json.fields['Check-out Date'] }}<br><br>\n\nNext Steps:<br>\n<ul>\n  <li>Please let us know what time you plan to arrive on the day so we can make sure someone is around to assist you. The best way to contact us is by emailing [REPLY_TO_EMAIL]</li>\n  <li>Check-out time is 11:00 AM on the departure day.</li>\n  <li>During your stay, we expect you to respect our <a href=\"[URL_TO_YOUR_CODE_OF_CONDUCT]\">code of conduct</a> and complete any required checkout procedures.</li>\n</ul>\n\nWe look forward to welcoming you. If you have any questions, please feel free to reach out.<br><br>\n\nCheers,<br>\n[Your Team/Organization Name]",
+        "options": {
+          "replyTo": "[REPLY_TO_EMAIL]"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -380,
+        2280
+      ],
+      "id": "3caa904b-9598-4f2e-9f90-55bdbdd8fe09",
+      "name": "Send Confirmation Email1",
+      "webhookId": "[WEBHOOK_ID_EMAIL_CONFIRM_2]"
+    },
+    {
+      "parameters": {
+        "fromEmail": "[SENDER_EMAIL]",
+        "toEmail": "={{ $json.fields['Email'] }}",
+        "subject": "[Your Organization Name] - Resource Unavailable",
+        "html": "=Hi {{ $('Update Booking - Rejected').first().json.fields['Guest Name']?.split(' ')[0]?.toSentenceCase() || 'there' }},<br><br>\n\nUnfortunately, your request for the resource between {{ $json.fields['Check-in Date'] }} and {{ $json.fields['Check-out Date'] }} isn't possible at this time.\n\nSorry about that! The resource is quite popular, and we can't accomodate every request.<br><br>\n\nFeel free to join us at our public events, like [Your Community Event].<br><br>\n\nCheers,<br>\n[Your Team/Organization Name]",
+        "options": {
+          "replyTo": "[REPLY_TO_EMAIL]"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -380,
+        2480
+      ],
+      "id": "69101269-f9b0-4530-8175-10a0693cd710",
+      "name": "Send Rejection Email",
+      "webhookId": "[WEBHOOK_ID_EMAIL_REJECT]"
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "serpApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=={{ $json.chunk[0] }}"
+            },
+            {
+              "name": "engine",
+              "value": "google"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4b172658-c7f1-461d-a6b8-085063905649",
+      "name": "Perform SerpAPI Search Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "url": "https://api.search.brave.com/res/v1/web/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=={{ $json.chunk[0] }}"
+            },
+            {
+              "name": "count",
+              "value": "5"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10dd5378-7f9c-455e-bc32-481921d10ea1",
+      "name": "Perform BraveAPI Search Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        0,
+        580
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "messageType": "block",
+        "blocksUi": "={\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"🔔 *New booking request!*\\n\\n*Name:* {{ $('Escape chars').first().json.fields['Guest Name'] }}\\n*Email:* {{ $('Escape chars').first().json.fields['Email'] }}\\n*Check-in:* {{ $('Escape chars').first().json.fields['Check-in Date'] }}\\n*Check-out:* {{ $('Escape chars').first().json.fields['Check-out Date'] }}\\n*Purpose:* {{ $('Escape chars').first().json.fields['Purpose'] }}\\n*Website:* {{ $('Escape chars').first().json.fields['Personal Website'] }}\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*🔍 Automated Research Summary (AI Agent):*\\n{{ $('Escape chars').first().json.fields['Automated Research'] }}\"\n      }\n    },\n    {\n      \"type\": \"divider\"\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"_This booking will be auto-approved after the review period unless manually decided._\"\n      }\n    }\n  ]\n}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -540,
+        1500
+      ],
+      "id": "82f5685d-2ec0-4df6-9b5e-c90ac27833ae",
+      "name": "Announce Booking",
+      "webhookId": "[WEBHOOK_ID_SLACK_ANNOUNCE]",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "update",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "ts": "={{ $('Announce Booking').first().json.message_timestamp }}",
+        "messageType": "block",
+        "blocksUi": "={\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n          \"text\": \"🔔 *New booking request!*\\n\\n*Name:* {{ $('Escape chars').first().json.fields['Guest Name'] }}\\n*Email:* {{ $('Escape chars').first().json.fields['Email'] }}\\n*Check-in:* {{ $('Escape chars').first().json.fields['Check-in Date'] }}\\n*Check-out:* {{ $('Escape chars').first().json.fields['Check-out Date'] }}\\n*Purpose:* {{ $('Escape chars').first().json.fields['Purpose'] }}\\n*Website:* {{ $('Escape chars').first().json.fields['Personal Website'] }}\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*🔍 Automated Research Summary (AI Agent):*\\n{{ $('Escape chars').first().json.fields['Automated Research'] }}\"\n      }\n    },\n    {\n      \"type\": \"divider\"\n    },\n    {\n      \"type\": \"actions\",\n      \"elements\": [\n        {\n          \"type\": \"button\",\n          \"text\": {\n            \"type\": \"plain_text\",\n            \"text\": \"✅ Approve\"\n          },\n          \"url\": \"[N8N_INSTANCE_URL]/webhook/approve?booking={{ $('Escape chars').first().json.id }}&timestamp={{ $('Announce Booking').first().json.message_timestamp }}\"\n        },\n        {\n          \"type\": \"button\",\n          \"text\": {\n            \"type\": \"plain_text\",\n            \"text\": \"❌ Reject\"\n          },\n          \"url\": \"[N8N_INSTANCE_URL]/webhook/reject?booking={{ $('Escape chars').first().json.id }}&timestamp={{ $('Announce Booking').first().json.message_timestamp }}\"\n        }\n      ]\n    }\n  ]\n}",
+        "updateFields": {},
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -320,
+        1500
+      ],
+      "id": "799a8c08-ddf3-455b-9548-c9cf6fcc5378",
+      "name": "Update message with buttons",
+      "webhookId": "[WEBHOOK_ID_SLACK_UPDATE_BUTTONS]"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "[AIRTABLE_BASE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings",
+          "cachedResultUrl": "https://airtable.com/[AIRTABLE_BASE_ID]"
+        },
+        "table": {
+          "__rl": true,
+          "value": "[AIRTABLE_TABLE_ID]",
+          "mode": "list",
+          "cachedResultName": "Bookings Table",
+          "cachedResultUrl": "https://airtable.com/[AIRTABLE_BASE_ID]/[AIRTABLE_TABLE_ID]"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Slack Message ID": "={{ $('Announce Booking').first().json.message_timestamp }}",
+            "id": "={{ $('Airtable').first().json.id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -100,
+        1500
+      ],
+      "id": "00f48d8b-860a-44cc-99ab-fbb8d919cb82",
+      "name": "Add timestamp to Airtable row"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "update",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "ts": "={{ $('Extract Approve Booking ID').item.json.messageTs }}",
+        "messageType": "block",
+        "blocksUi": "={\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"🔔 *Booking Request - APPROVED ✅*\\n\\n*Name:* {{ $('Escape chars1').item.json.fields['Guest Name'] }}\\n*Email:* {{ $('Escape chars1').item.json.fields['Email'] }}\\n*Check-in:* {{ $('Escape chars1').item.json.fields['Check-in Date'] }}\\n*Check-out:* {{ $('Escape chars1').item.json.fields['Check-out Date'] }}\\n*Purpose:* {{ $('Escape chars1').item.json.fields['Purpose'] }}\\n*Website:* {{ $('Escape chars1').item.json.fields['Personal Website'] }}\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*🔍 Automated Research Summary (AI Agent):*\\n{{ $('Escape chars1').item.json.fields['Automated Research'] }}\"\n      }\n    },\n    {\n      \"type\": \"divider\"\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"_✅ This booking was manually approved via Slack button._\"\n      }\n    }\n  ]\n}",
+        "updateFields": {},
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        60,
+        2280
+      ],
+      "id": "f63b1554-fb64-4ca0-9f8a-1db31d3200fe",
+      "name": "Update Slack message with Approved",
+      "webhookId": "[WEBHOOK_ID_SLACK_UPDATE_STATUS]"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the data and escape quotes in all text fields\nconst data = $input.first().json;\n\n// Function to safely escape text\nfunction sanitizeText(text) {\n  if (!text || typeof text !== 'string') return text;\n  return text\n    .replace(/\\\\/g, '\\\\\\\\') // Escape backslashes first\n    .replace(/\"/g, '\\\\\"')   // Escape double quotes\n    .replace(/\\n/g, '\\\\n')  // Escape newlines\n    .replace(/\\r/g, '\\\\r')  // Escape carriage returns\n    .replace(/\\t/g, '\\\\t');  // Escape tabs\n}\n\n// Sanitize all text fields that could contain user input\nif (data.fields) {\n  const textFields = [\n    'Guest Name',\n    'Email', \n    'Purpose',\n    'Personal Website',\n    'Automated Research'\n  ];\n  \n  textFields.forEach(field => {\n    if (data.fields[field]) {\n      data.fields[field] = sanitizeText(data.fields[field]);\n    }\n  });\n}\n\nreturn [{ json: data }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        1500
+      ],
+      "id": "c49c9843-7936-42bf-bd5e-3c428b7f1704",
+      "name": "Escape chars"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the data and escape quotes in all text fields\nconst data = $('Update Booking - Approved').first().json;\n\n// Function to safely escape text\nfunction sanitizeText(text) {\n  if (!text || typeof text !== 'string') return text;\n  return text\n    .replace(/\\\\/g, '\\\\\\\\') // Escape backslashes first\n    .replace(/\"/g, '\\\\\"')   // Escape double quotes\n    .replace(/\\n/g, '\\\\n')  // Escape newlines\n    .replace(/\\r/g, '\\\\r')  // Escape carriage returns\n    .replace(/\\t/g, '\\\\t');  // Escape tabs\n}\n\n// Sanitize all text fields that could contain user input\nif (data.fields) {\n  const textFields = [\n    'Guest Name',\n    'Email', \n    'Purpose',\n    'Personal Website',\n    'Automated Research'\n  ];\n  \n  textFields.forEach(field => {\n    if (data.fields[field]) {\n      data.fields[field] = sanitizeText(data.fields[field]);\n    }\n  });\n}\n\nreturn [{ json: data }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        2280
+      ],
+      "id": "65985752-6358-4542-8e4b-e1931f386718",
+      "name": "Escape chars1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the data and escape quotes in all text fields\nconst data = $('Update Booking - Rejected').first().json;\n\n// Function to safely escape text\nfunction sanitizeText(text) {\n  if (!text || typeof text !== 'string') return text;\n  return text\n    .replace(/\\\\/g, '\\\\\\\\') // Escape backslashes first\n    .replace(/\"/g, '\\\\\"')   // Escape double quotes\n    .replace(/\\n/g, '\\\\n')  // Escape newlines\n    .replace(/\\r/g, '\\\\r')  // Escape carriage returns\n    .replace(/\\t/g, '\\\\t');  // Escape tabs\n}\n\n// Sanitize all text fields that could contain user input\nif (data.fields) {\n  const textFields = [\n    'Guest Name',\n    'Email', \n    'Purpose',\n    'Personal Website',\n    'Automated Research'\n  ];\n  \n  textFields.forEach(field => {\n    if (data.fields[field]) {\n      data.fields[field] = sanitizeText(data.fields[field]);\n    }\n  });\n}\n\nreturn [{ json: data }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        2480
+      ],
+      "id": "a3d7a8c0-95fd-48ed-bfe9-4e2fc570ea3e",
+      "name": "Escape chars2"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "update",
+        "channelId": {
+          "__rl": true,
+          "value": "[SLACK_CHANNEL_ID]",
+          "mode": "list",
+          "cachedResultName": "n8n-testing"
+        },
+        "ts": "={{ $('Extract Reject Booking ID').item.json.messageTs }}",
+        "messageType": "block",
+        "blocksUi": "={\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"🔔 *Booking Request - REJECTED ❌*\\n\\n*Name:* {{ $('Escape chars2').item.json.fields['Guest Name'] }}\\n*Email:* {{ $('Escape chars2').item.json.fields['Email'] }}\\n*Check-in:* {{ $('Escape chars2').item.json.fields['Check-in Date'] }}\\n*Check-out:* {{ $('Escape chars2').item.json.fields['Check-out Date'] }}\\n*Purpose:* {{ $('Escape chars2').item.json.fields['Purpose'] }}\\n*Website:* {{ $('Escape chars2').item.json.fields['Personal Website'] }}\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*🔍 Automated Research Summary (AI Agent):*\\n{{ $('Escape chars2').item.json.fields['Automated Research'] }}\"\n      }\n    },\n    {\n      \"type\": \"divider\"\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"_❌ This booking was manually rejected via Slack button._\"\n      }\n    }\n  ]\n}",
+        "updateFields": {},
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        60,
+        2480
+      ],
+      "id": "17f71b14-7917-4ff1-8c5b-46afb7f1e379",
+      "name": "Update Slack message with Rejected",
+      "webhookId": "[WEBHOOK_ID_SLACK_UPDATE_STATUS]"
+    },
+    {
+      "parameters": {
+        "content": "## Manual Approve/Reject Workflow\n- Triggered by webhooks linked from Slack buttons.",
+        "height": 480,
+        "width": 2080,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        2200
+      ],
+      "id": "06561f11-2bf1-4b1a-848f-defba250e409",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_CHARS = 1000;\nconst MIN_MEANINGFUL_LENGTH = 100;\n\nfunction cleanAndTruncateContent(content) {\n  if (!content || typeof content !== 'string') {\n    return '';\n  }\n  \n  // Remove excessive whitespace and clean up\n  let cleaned = content\n    .replace(/\\s+/g, ' ') // Replace multiple spaces with single space\n    .replace(/\\n\\s*\\n/g, '\\n') // Remove empty lines\n    .trim();\n  \n  // If content is already short enough, return as-is\n  if (cleaned.length <= MAX_CHARS) {\n    return cleaned;\n  }\n  \n  // Find a good truncation point near the limit\n  let truncateAt = MAX_CHARS;\n  \n  // Try to find the last sentence ending before the limit\n  const sentenceEndings = /[.!?]\\s+/g;\n  let lastSentenceEnd = 0;\n  let match;\n  \n  while ((match = sentenceEndings.exec(cleaned)) !== null) {\n    if (match.index < MAX_CHARS) {\n      lastSentenceEnd = match.index + match[0].length;\n    } else {\n      break;\n    }\n  }\n  \n  // If we found a good sentence boundary, use it\n  if (lastSentenceEnd > MIN_MEANINGFUL_LENGTH) {\n    truncateAt = lastSentenceEnd;\n  } else {\n    // Otherwise, find the last space before the limit\n    const lastSpace = cleaned.lastIndexOf(' ', MAX_CHARS);\n    if (lastSpace > MIN_MEANINGFUL_LENGTH) {\n      truncateAt = lastSpace;\n    }\n  }\n  \n  return cleaned.substring(0, truncateAt).trim();\n}\n\nfunction isContentRelevant(content) {\n  if (!content || content.length < MIN_MEANINGFUL_LENGTH) {\n    return false;\n  }\n  \n  // Skip obviously irrelevant content\n  const irrelevantPatterns = [\n    /^(cookie|privacy|terms|legal|404|error)/i,\n    /^(home|navigation|menu|footer|header)/i,\n    /^.{0,50}$/  // Very short content\n  ];\n  \n  return !irrelevantPatterns.some(pattern => pattern.test(content.trim()));\n}\n\n// Process the input from Jina AI\nconst jinaResponse = $input.first().json;\n\n// Handle the Jina AI response format\nlet contentToProcess = '';\n\n// Extract content from Jina AI response\nif (jinaResponse.data) {\n  contentToProcess = jinaResponse.data;\n} else if (jinaResponse.content) {\n  contentToProcess = jinaResponse.content;\n} else if (typeof jinaResponse === 'string') {\n  contentToProcess = jinaResponse;\n} else {\n  // If it's a different format, try to stringify and extract\n  contentToProcess = JSON.stringify(jinaResponse);\n}\n\n// Apply filtering\nif (isContentRelevant(contentToProcess)) {\n  const filteredContent = cleanAndTruncateContent(contentToProcess);\n  \n  return [{\n    json: {\n      data: filteredContent,\n      url: jinaResponse.url || 'unknown',\n      originalLength: contentToProcess.length,\n      filteredLength: filteredContent.length,\n      filtered: true\n    }\n  }];\n} else {\n  // Return minimal data for irrelevant content\n  return [{\n    json: {\n      data: 'Content filtered out as irrelevant',\n      url: jinaResponse.url || 'unknown',\n      originalLength: contentToProcess.length,\n      filteredLength: 0,\n      filtered: true,\n      skipped: true\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        860
+      ],
+      "id": "7dc8c503-ca40-4a2e-8481-a382a4f13ed9",
+      "name": "Truncate output length"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Calendar": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "booking-page": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "booking-submit": {
+      "main": [
+        [
+          {
+            "node": "Prepare Guest Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable": {
+      "main": [
+        [
+          {
+            "node": "Escape chars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Bookings (96h+)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to Approved": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Update": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Guest Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Search Queries using LLM1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Search Queries using LLM1": {
+      "main": [
+        [
+          {
+            "node": "Parse and Chunk JSON Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Response Provider (OpenRouter)1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Search Queries using LLM1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Extract Relevant Context via LLM1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Generate Comprehensive Research Report1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Chunk JSON Data1": {
+      "main": [
+        [
+          {
+            "node": "Split Data for SerpAPI Batching1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform Jina AI Analysis Request1": {
+      "main": [
+        [
+          {
+            "node": "Truncate output length",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format SerpAPI Organic Results1": {
+      "main": [
+        [
+          {
+            "node": "Split Data for Jina AI Batching1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Relevant Context via LLM1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive Research Report1": {
+      "main": [
+        [
+          {
+            "node": "Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Data for SerpAPI Batching1": {
+      "main": [
+        [
+          {
+            "node": "Format SerpAPI Organic Results1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Perform BraveAPI Search Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Data for Jina AI Batching1": {
+      "main": [
+        [
+          {
+            "node": "Extract Relevant Context via LLM1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Perform Jina AI Analysis Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Memory Buffer (Input Context)1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Extract Relevant Context via LLM1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Memory Buffer (Report Context)1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Generate Comprehensive Research Report1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Wikipedia Information1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Generate Comprehensive Research Report1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Generate Comprehensive Research Report1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Bookings (96h+)": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approve Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Approve Booking ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Approve Booking ID": {
+      "main": [
+        [
+          {
+            "node": "Update Booking - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Booking - Approved": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reject Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Reject Booking ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Reject Booking ID": {
+      "main": [
+        [
+          {
+            "node": "Update Booking - Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Booking - Rejected": {
+      "main": [
+        [
+          {
+            "node": "Send Rejection Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Rejection Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Reject Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event1": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email1": {
+      "main": [
+        [
+          {
+            "node": "Escape chars1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Approve Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Rejection Email": {
+      "main": [
+        [
+          {
+            "node": "Escape chars2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform BraveAPI Search Request": {
+      "main": [
+        [
+          {
+            "node": "Split Data for SerpAPI Batching1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Announce Booking": {
+      "main": [
+        [
+          {
+            "node": "Update message with buttons",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update message with buttons": {
+      "main": [
+        [
+          {
+            "node": "Add timestamp to Airtable row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add timestamp to Airtable row": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Slack message with Approved": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escape chars": {
+      "main": [
+        [
+          {
+            "node": "Announce Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escape chars1": {
+      "main": [
+        [
+          {
+            "node": "Update Slack message with Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escape chars2": {
+      "main": [
+        [
+          {
+            "node": "Update Slack message with Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Slack message with Rejected": {
+      "main": [
+        [
+          {
+            "node": "Send Rejection Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Truncate output length": {
+      "main": [
+        [
+          {
+            "node": "Split Data for Jina AI Batching1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "[N8N_WORKFLOW_VERSION_ID]",
+  "meta": {
+    "instanceId": "[N8N_INSTANCE_ID]"
+  },
+  "id": "[N8N_WORKFLOW_ID]",
+  "tags": []
+}

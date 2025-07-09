@@ -1,0 +1,283 @@
+{
+  "name": "Summarize Airtable to GDocs and Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 7,
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -940,
+        -500
+      ],
+      "id": "b8cdf7b2-b06f-4cff-88bb-7db36017065d",
+      "name": "Every 7 Days"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Airtable Base Name",
+          "cachedResultUrl": "https://airtable.com/YOUR_AIRTABLE_BASE_ID"
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Slack Channel Name",
+          "cachedResultUrl": "https://airtable.com/YOUR_AIRTABLE_BASE_ID/YOUR_AIRTABLE_TABLE_ID"
+        },
+        "filterByFormula": "=IS_AFTER({date_added}, DATEADD(TODAY(), -7, 'days'))",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -740,
+        -500
+      ],
+      "id": "cdc0eeac-06ba-490a-ba03-7f1fc740d0b1",
+      "name": "Get Recent Items",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "YOUR_AIRTABLE_CREDENTIAL_ID",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Airtable data into numbered list format with spacing\nconst items = $input.all();\n\n// Helper function to clean and format tags\nfunction formatTags(tags) {\n  if (!tags || tags.length === 0) return '';\n  const tagArray = Array.isArray(tags) ? tags : [tags];\n  return tagArray.join(', ');\n}\n\n// Start building the document content\nlet textContent = `EXPORT (${items.length} items)\\n`;\n\nif (items.length === 0) {\n  textContent += `No items found in the last 7 days.\\n`;\n} else {\n  // Sort items by date (newest first)\n  const sortedItems = items.sort((a, b) => {\n    const dateA = new Date(a.json.date_added);\n    const dateB = new Date(b.json.date_added);\n    return dateB - dateA;\n  });\n  \n  sortedItems.forEach((item, index) => {\n    const data = item.json;\n    const url = data.url;\n    const summary = data.summary;\n    const tags = data.tags;\n    \n    // Add item number and summary\n    textContent += `${index + 1}. `;\n    if (summary) {\n      textContent += `${summary}\\n`;\n    }\n    \n    // Add URL\n    if (url) {\n      textContent += `URL: ${url}\\n`;\n    }\n    \n    // Add tags\n    if (tags && tags.length > 0) {\n      textContent += `TAGS: ${formatTags(tags)}\\n`;\n    }\n    \n    // Add spacing between items (but not after the last one)\n    if (index < sortedItems.length - 1) {\n      textContent += `\\n`;\n    }\n  });\n}\n\nreturn [\n  {\n    json: {\n      text: textContent,\n      itemCount: items.length,\n      exportDate: new Date().toISOString(),\n      title: `Export - ${new Date().toLocaleDateString()}`\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -540,
+        -500
+      ],
+      "id": "f41c2279-3b00-4f1f-bdf5-bf438721f15a",
+      "name": "Format Document"
+    },
+    {
+      "parameters": {
+        "driveId": "sharedWithMe",
+        "folderId": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+        "title": "={{ $json.title }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -340,
+        -500
+      ],
+      "id": "3acc09b9-2de3-4d9f-b926-398f0d3da1f8",
+      "name": "Create Google Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YOUR_GOOGLE_DOCS_CREDENTIAL_ID",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Format Document').item.json.text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        -500
+      ],
+      "id": "e52f1905-a179-4a79-a82f-a9f2c033ed84",
+      "name": "Update Document with Content",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YOUR_GOOGLE_DOCS_CREDENTIAL_ID_2",
+          "name": "Google Docs account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assignment-1",
+              "name": "doc_url",
+              "value": "=https://docs.google.com/document/d/{{ $json.documentId }}/edit",
+              "type": "string"
+            },
+            {
+              "id": "assignment-2",
+              "name": "item_count",
+              "value": "={{ $('Format Document').first().json.itemCount }}",
+              "type": "number"
+            },
+            {
+              "id": "assignment-3",
+              "name": "export_date",
+              "value": "={{ $('Format Document').first().json.exportDate }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        80,
+        -500
+      ],
+      "id": "d217082d-de39-4741-a9d4-49b2f61e2746",
+      "name": "Prepare Notification"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SLACK_CHANNEL_ID",
+          "mode": "list",
+          "cachedResultName": "channel_name"
+        },
+        "text": "=📄 *Weekly Export Ready!*\n\n🗓️ *Export Date:* {{ new Date($json.export_date).toLocaleDateString() }}\n📊 *Items Exported:* {{ $json.item_count }}\n📋 *Time Period:* Last 7 days\n\n🔗 *View Document:* {{ $json.doc_url }}\n\n_This automated export includes all items added to the Slack channel in the past week._",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        280,
+        -500
+      ],
+      "id": "0fbfd3e9-de4a-443c-8301-496b4867b853",
+      "name": "Post Notification to Slack",
+      "webhookId": "post-notification-webhook",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Every 7 Days": [
+      {
+        "json": {
+          "timestamp": "2025-07-02T18:00:23.007-04:00",
+          "Readable date": "July 2nd 2025, 6:00:23 pm",
+          "Readable time": "6:00:23 pm",
+          "Day of week": "Wednesday",
+          "Year": "2025",
+          "Month": "July",
+          "Day of month": "02",
+          "Hour": "18",
+          "Minute": "00",
+          "Second": "23",
+          "Timezone": "America/New_York (UTC-04:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Every 7 Days": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Fieldwork Items": {
+      "main": [
+        [
+          {
+            "node": "Format Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Document": {
+      "main": [
+        [
+          {
+            "node": "Create Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Update Document with Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Document with Content": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notification": {
+      "main": [
+        [
+          {
+            "node": "Post Notification to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "WORKFLOW_VERSION_ID",
+  "meta": {
+    "instanceId": "YOUR_N8N_INSTANCE_ID"
+  },
+  "id": "YOUR_WORKFLOW_ID",
+  "tags": []
+}
